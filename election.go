@@ -14,6 +14,7 @@ import (
 // State indicates the current state of the election
 type State uint
 
+// Election is a NATS Key-Value Store based Leader Election system
 type Election interface {
 	// Start starts the election, interrupted by context. Blocks until stopped.
 	Start(ctx context.Context) error
@@ -40,6 +41,7 @@ type Backoff interface {
 	Duration(n int) time.Duration
 }
 
+// implements Election
 type election struct {
 	opts  *options
 	state State
@@ -188,6 +190,7 @@ func (e *election) campaign(wg *sync.WaitGroup) error {
 			if e.opts.bo != nil {
 				ticker.Reset(e.opts.bo.Duration(e.tries))
 			}
+
 		case <-e.ctx.Done():
 			ticker.Stop()
 			e.stop()
@@ -274,5 +277,5 @@ func ctxSleep(ctx context.Context, duration time.Duration) error {
 
 	<-sctx.Done()
 
-	return ctx.Err()
+	return sctx.Err()
 }

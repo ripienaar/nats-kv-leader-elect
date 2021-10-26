@@ -15,7 +15,7 @@ A leader will then regularly, around 75% of TTL time, do a `Update()` on the key
 is the sequence number of his last `Update()`, as long as this series is maintained he knows he is still the leader.
 Failure to `Update()` is a leadership loss.
 
-If the leader fails to update the key within TTL, the key will expire and one of the campaigners will have a succesfull
+If the leader fails to update the key within TTL, the key will expire and one of the campaigners will have a successful
 `Create()` call, so leadership is switched.
 
 ## Limitations?

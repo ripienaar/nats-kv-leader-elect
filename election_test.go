@@ -15,7 +15,7 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-func TestChoria(t *testing.T) {
+func TestLeader(t *testing.T) {
 	RegisterFailHandler(Fail)
 	RunSpecs(t, "NatsKVElection")
 }
