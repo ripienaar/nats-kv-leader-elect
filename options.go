@@ -27,13 +27,13 @@ func WithBackoff(bo Backoff) Option {
 	return func(o *options) { o.bo = bo }
 }
 
-// OnLeaderGained is a callback called when winning an election
-func OnLeaderGained(cb func()) Option {
+// OnWon is a callback called when winning an election
+func OnWon(cb func()) Option {
 	return func(o *options) { o.wonCb = cb }
 }
 
-// OnLeaderLost is a callback called when losing an election
-func OnLeaderLost(cb func()) Option {
+// OnLost is a callback called when losing an election
+func OnLost(cb func()) Option {
 	return func(o *options) { o.lostCb = cb }
 }
 

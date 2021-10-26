@@ -119,8 +119,8 @@ var _ = Describe("NATS KV Leader Election", func() {
 				}
 
 				elect, err := NewElection(fmt.Sprintf("member %d", i), "election", kv,
-					OnLeaderGained(winCb),
-					OnLeaderLost(lostCb),
+					OnWon(winCb),
+					OnLost(lostCb),
 					WithDebug(debugger))
 				Expect(err).ToNot(HaveOccurred())
 
@@ -139,6 +139,10 @@ var _ = Describe("NATS KV Leader Election", func() {
 					break
 				}
 				kills++
+				val, _ := kv.Get("election")
+				if val != nil {
+					debugger("current leader is %q\n", val.Value())
+				}
 				debugger("deleting key\n")
 				Expect(kv.Delete("election")).ToNot(HaveOccurred())
 			}
@@ -148,8 +152,8 @@ var _ = Describe("NATS KV Leader Election", func() {
 			mu.Lock()
 			defer mu.Unlock()
 
-			if kills == 0 {
-				Fail("no kills were done")
+			if kills < 5 {
+				Fail(fmt.Sprintf("had only %d kills", kills))
 			}
 			if wins < kills {
 				Fail(fmt.Sprintf("won only %d elections", wins))

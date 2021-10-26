@@ -45,8 +45,8 @@ $ nats kv add --ttl 5m ELECTIONS
 kv, _ := js.KeyValue("ELECTIONS")
 
 elect, _ := NewElection("member 1", "election", kv,
-	OnLeaderGained(handleBecomingLeader),
-	OnLeaderLost(handleLosingLeadership)))
+	OnWon(handleBecomingLeader),
+	OnLost(handleLosingLeadership)))
 
 // blocks until stopped, calls the handleBecomingLeader() and handleLosingLeadership() functions on change
 elect.Start(ctx)

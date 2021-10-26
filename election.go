@@ -147,7 +147,7 @@ func (e *election) try() error {
 		// deleted right before the previous leader did a campaign he will think
 		// he is leader for one more round of cInterval
 		go func() {
-			ctxSleep(e.ctx, e.opts.cInterval)
+			ctxSleep(e.ctx, e.opts.cInterval+500*time.Millisecond)
 			if e.opts.wonCb != nil {
 				e.opts.wonCb()
 			}
