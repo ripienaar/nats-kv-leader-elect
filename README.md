@@ -29,15 +29,16 @@ this ensures that any previous leader had a chance to stand down.
 
 ## Usage?
 
+```nohighlight
+$ nats kv add --ttl 5m ELECTIONS 
+```
+
 ```go
-kv, _ = js.CreateKeyValue(&nats.KeyValueConfig{
-    Bucket: "LEADER_ELECTION",
-    TTL:    60 * time.Second,
-})
+kv, _ := js.KeyValue("ELECTION")
 
 elect, _ := NewElection("member 1", "election", kv,
 	OnLeaderGained(handleBecomingLeader),
-    OnLeaderLost(handleLosingLeadership)))
+	OnLeaderLost(handleLosingLeadership)))
 
 // blocks until stopped, calls the handleBecomingLeader() and handleLosingLeadership() functions on change
 elect.Start(ctx)
