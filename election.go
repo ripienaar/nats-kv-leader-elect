@@ -120,7 +120,7 @@ func (e *election) try() error {
 	case LeaderState:
 		seq, err := e.opts.bucket.Update(e.opts.key, []byte(e.opts.name), e.lastSeq)
 		if err != nil {
-			e.debugf("key update failed, moving to candidate state: %v\n", err)
+			e.debugf("key update failed, moving to candidate state: %v", err)
 			e.state = CandidateState
 			e.lastSeq = math.MaxUint64
 			if e.opts.lostCb != nil {
@@ -277,5 +277,5 @@ func ctxSleep(ctx context.Context, duration time.Duration) error {
 
 	<-sctx.Done()
 
-	return sctx.Err()
+	return ctx.Err()
 }
