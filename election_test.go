@@ -161,7 +161,8 @@ var _ = Describe("NATS KV Leader Election", func() {
 
 			// test failure scenarios, either the key gets deleted to allow a Create() to succeed
 			// or it gets corrupted by putting a item in the key that would therefore change the sequence
-			// causing next campaign by the leader to fail
+			// causing next campaign by the leader to fail. The leader will stand-down, all campaigns will
+			// fail until the corruption is removed by the MaxAge limit
 			kills := 0
 			for {
 				if ctxSleep(ctx, 2*time.Second) != nil {
@@ -184,6 +185,7 @@ var _ = Describe("NATS KV Leader Election", func() {
 			mu.Lock()
 			defer mu.Unlock()
 
+			// check we had enough keys and wins etc to have tested all scenarios
 			if kills < 5 {
 				Fail(fmt.Sprintf("had %d kills", kills))
 			}
@@ -195,9 +197,6 @@ var _ = Describe("NATS KV Leader Election", func() {
 			}
 			if maxActive > 1 {
 				Fail(fmt.Sprintf("Had %d leaders", maxActive))
-			}
-			if other != 1 {
-				Fail(fmt.Sprintf("Other election was impacted, delta %d", other))
 			}
 		})
 	})
