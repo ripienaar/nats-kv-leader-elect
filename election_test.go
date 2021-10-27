@@ -38,11 +38,11 @@ var _ = Describe("NATS KV Leader Election", func() {
 
 		kv, err = js.CreateKeyValue(&nats.KeyValueConfig{
 			Bucket: "LEADER_ELECTION",
-			TTL:    2 * time.Second,
+			TTL:    1500 * time.Millisecond,
 		})
 		Expect(err).ToNot(HaveOccurred())
 		debugger = func(f string, a ...interface{}) {
-			fmt.Fprintf(GinkgoWriter, f, a...)
+			fmt.Fprintf(GinkgoWriter, fmt.Sprintf("%s\n", f), a...)
 		}
 	})
 
@@ -85,6 +85,7 @@ var _ = Describe("NATS KV Leader Election", func() {
 				lost      = 0
 				active    = 0
 				maxActive = 0
+				other     = 0
 				wg        = &sync.WaitGroup{}
 				mu        = sync.Mutex{}
 			)
@@ -94,7 +95,7 @@ var _ = Describe("NATS KV Leader Election", func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 			defer cancel()
 
-			worker := func(wg *sync.WaitGroup, i int) {
+			worker := func(wg *sync.WaitGroup, i int, key string) {
 				defer wg.Done()
 
 				winCb := func() {
@@ -107,7 +108,7 @@ var _ = Describe("NATS KV Leader Election", func() {
 					act := active
 					mu.Unlock()
 
-					debugger("%d became leader with %d active leaders\n", i, act)
+					debugger("%d became leader with %d active leaders", i, act)
 				}
 
 				lostCb := func() {
@@ -115,10 +116,10 @@ var _ = Describe("NATS KV Leader Election", func() {
 					lost++
 					active--
 					mu.Unlock()
-					debugger("%d lost leadership\n", i)
+					debugger("%d lost leadership", i)
 				}
 
-				elect, err := NewElection(fmt.Sprintf("member %d", i), "election", kv,
+				elect, err := NewElection(fmt.Sprintf("member %d", i), key, kv,
 					OnWon(winCb),
 					OnLost(lostCb),
 					WithDebug(debugger))
@@ -130,21 +131,52 @@ var _ = Describe("NATS KV Leader Election", func() {
 
 			for i := 0; i < 10; i++ {
 				wg.Add(1)
-				go worker(wg, i)
+				go worker(wg, i, "election")
 			}
 
+			// make sure another election is not interrupted
+			otherWorker := func(wg *sync.WaitGroup) {
+				defer wg.Done()
+
+				elect, err := NewElection("other", "other", kv,
+					OnWon(func() {
+						mu.Lock()
+						debugger("other gained leader")
+						other++
+						mu.Unlock()
+					}),
+					OnLost(func() {
+						mu.Lock()
+						Fail("Other election was lost")
+						mu.Unlock()
+					}))
+				Expect(err).ToNot(HaveOccurred())
+
+				err = elect.Start(ctx)
+				Expect(err).ToNot(HaveOccurred())
+			}
+			wg.Add(2)
+			go otherWorker(wg)
+			go otherWorker(wg)
+
+			// test failure scenarios, either the key gets deleted to allow a Create() to succeed
+			// or it gets corrupted by putting a item in the key that would therefore change the sequence
+			// causing next campaign by the leader to fail
 			kills := 0
 			for {
 				if ctxSleep(ctx, 2*time.Second) != nil {
 					break
 				}
+
 				kills++
-				val, _ := kv.Get("election")
-				if val != nil {
-					debugger("current leader is %q\n", val.Value())
+				if kills%3 == 0 {
+					debugger("deleting key")
+					Expect(kv.Delete("election")).ToNot(HaveOccurred())
+				} else {
+					debugger("corrupting key")
+					_, err := kv.Put("election", nil)
+					Expect(err).ToNot(HaveOccurred())
 				}
-				debugger("deleting key\n")
-				Expect(kv.Delete("election")).ToNot(HaveOccurred())
 			}
 
 			wg.Wait()
@@ -153,16 +185,19 @@ var _ = Describe("NATS KV Leader Election", func() {
 			defer mu.Unlock()
 
 			if kills < 5 {
-				Fail(fmt.Sprintf("had only %d kills", kills))
+				Fail(fmt.Sprintf("had %d kills", kills))
 			}
-			if wins < kills {
-				Fail(fmt.Sprintf("won only %d elections", wins))
+			if wins < 5 {
+				Fail(fmt.Sprintf("won only %d elections for %d kills", wins, kills))
 			}
-			if lost < kills {
+			if lost < 5 {
 				Fail(fmt.Sprintf("lost only %d elections", lost))
 			}
 			if maxActive > 1 {
 				Fail(fmt.Sprintf("Had %d leaders", maxActive))
+			}
+			if other != 1 {
+				Fail(fmt.Sprintf("Other election was impacted, delta %d", other))
 			}
 		})
 	})
