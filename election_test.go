@@ -38,7 +38,7 @@ var _ = Describe("NATS KV Leader Election", func() {
 
 		kv, err = js.CreateKeyValue(&nats.KeyValueConfig{
 			Bucket: "LEADER_ELECTION",
-			TTL:    1500 * time.Millisecond,
+			TTL:    500 * time.Millisecond,
 		})
 		Expect(err).ToNot(HaveOccurred())
 		debugger = func(f string, a ...interface{}) {
@@ -59,7 +59,7 @@ var _ = Describe("NATS KV Leader Election", func() {
 		It("Should validate the TTL", func() {
 			kv, err := js.CreateKeyValue(&nats.KeyValueConfig{
 				Bucket: "LE",
-				TTL:    time.Second,
+				TTL:    500 * time.Millisecond,
 			})
 			Expect(err).ToNot(HaveOccurred())
 
@@ -92,7 +92,7 @@ var _ = Describe("NATS KV Leader Election", func() {
 
 			skipValidate = true
 
-			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
 
 			worker := func(wg *sync.WaitGroup, i int, key string) {
@@ -120,6 +120,7 @@ var _ = Describe("NATS KV Leader Election", func() {
 				}
 
 				elect, err := NewElection(fmt.Sprintf("member %d", i), key, kv,
+					WithoutSplay(),
 					OnWon(winCb),
 					OnLost(lostCb),
 					WithDebug(debugger))
@@ -139,6 +140,7 @@ var _ = Describe("NATS KV Leader Election", func() {
 				defer wg.Done()
 
 				elect, err := NewElection("other", "other", kv,
+					WithoutSplay(),
 					OnWon(func() {
 						mu.Lock()
 						debugger("other gained leader")
@@ -165,7 +167,7 @@ var _ = Describe("NATS KV Leader Election", func() {
 			// fail until the corruption is removed by the MaxAge limit
 			kills := 0
 			for {
-				if ctxSleep(ctx, 2*time.Second) != nil {
+				if ctxSleep(ctx, 750*time.Millisecond) != nil {
 					break
 				}
 

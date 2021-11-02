@@ -19,12 +19,18 @@ type options struct {
 	lostCb     func()
 	campaignCb func(s State)
 	bo         Backoff
+	noSplay    bool
 	debug      func(format string, a ...interface{})
 }
 
 // WithBackoff will use the provided Backoff timer source to decrease campaign intervals over time
 func WithBackoff(bo Backoff) Option {
 	return func(o *options) { o.bo = bo }
+}
+
+// WithoutSplay disables random sleeping before election starts
+func WithoutSplay() Option {
+	return func(o *options) { o.noSplay = true }
 }
 
 // OnWon is a callback called when winning an election

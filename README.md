@@ -52,6 +52,22 @@ elect, _ := NewElection("member 1", "election", kv,
 elect.Start(ctx)
 ```
 
+## Demo?
+
+We have a demo program in `cmd` directory, this requires a `DEMO_ELECTION` bucket:
+
+```nohighlight
+$ nats kv add --ttl 31s DEMO_ELECTION 
+```
+
+It also requires a `nats context` setup that connect to your nats network, use the `nats context add` CLI to do that. Without
+setting `CONTEXT` like below it will use your default selected context, same as the CLI.
+
+```nohighlight
+$ go install github.com/ripienaar/nats-kv-leader-elect/cmd/election@main
+$ CONTEXT=election election
+```
+
 ## Contact?
 
 R.I.Pienaar / @ripienaar / rip@devco.net

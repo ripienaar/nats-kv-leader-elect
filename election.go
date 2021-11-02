@@ -11,8 +11,11 @@ import (
 	"github.com/nats-io/nats.go"
 )
 
-// State indicates the current state of the election
-type State uint
+// Backoff controls the interval of campaigns
+type Backoff interface {
+	// Duration returns the time to sleep for the nth invocation
+	Duration(n int) time.Duration
+}
 
 // Election is a NATS Key-Value Store based Leader Election system
 type Election interface {
@@ -26,6 +29,9 @@ type Election interface {
 	State() State
 }
 
+// State indicates the current state of the election
+type State uint
+
 const (
 	// UnknownState indicates the state is unknown, like when the election is not started
 	UnknownState State = 0
@@ -34,12 +40,6 @@ const (
 	// LeaderState is the leader
 	LeaderState State = 2
 )
-
-// Backoff controls the interval of campaigns
-type Backoff interface {
-	// Duration returns the time to sleep for the nth invocation
-	Duration(n int) time.Duration
-}
 
 // implements Election
 type election struct {
@@ -52,7 +52,11 @@ type election struct {
 	lastSeq uint64
 	tries   int
 
-	mu sync.Mutex
+	graceCtx    context.Context
+	graceCancel context.CancelFunc
+
+	mu            sync.Mutex
+	cancelGraceMu sync.Mutex
 }
 
 var skipValidate bool
@@ -83,7 +87,7 @@ func NewElection(name string, key string, bucket nats.KeyValue, opts ...Option) 
 		}
 	}
 
-	e.opts.cInterval = time.Duration(e.opts.ttl.Seconds()*0.75) * time.Second
+	e.opts.cInterval = time.Duration(float64(e.opts.ttl) * 0.75)
 
 	for _, opt := range opts {
 		opt(e.opts)
@@ -98,6 +102,8 @@ func NewElection(name string, key string, bucket nats.KeyValue, opts ...Option) 
 		}
 	}
 
+	e.debugf("Campaign interval: %v", e.opts.cInterval)
+
 	return e, nil
 }
 
@@ -106,6 +112,76 @@ func (e *election) debugf(format string, a ...interface{}) {
 		return
 	}
 	e.opts.debug(format, a...)
+}
+
+func (e *election) campaignForLeadership() error {
+	seq, err := e.opts.bucket.Create(e.opts.key, []byte(e.opts.name))
+	if err != nil {
+		e.tries++
+		return nil
+	}
+
+	e.debugf("Successfully created data in %s, starting %v grace period", e.opts.key, e.opts.cInterval)
+
+	e.lastSeq = seq
+	e.state = LeaderState
+	e.tries = 0
+
+	// we notify the caller after ~interval so that the past leader has a chance
+	// to detect the leadership loss, else if the key got just deleted right
+	// before the previous leader did a campaign he will think he is leader
+	// for one more round of cInterval
+	//
+	// cancelGrace interrupts us if a campaign is lost while we were waiting to notify
+	// about winning, so we make sure to call lost just in case and only calling win
+	// if at the time we're still leader
+	go func() {
+		e.cancelGraceMu.Lock()
+		e.graceCtx, e.graceCancel = context.WithCancel(e.ctx)
+		e.cancelGraceMu.Unlock()
+
+		if ctxSleep(e.graceCtx, e.opts.cInterval+50*time.Millisecond) == nil {
+			e.mu.Lock()
+			defer e.mu.Unlock()
+
+			if e.state == LeaderState {
+				if e.opts.wonCb != nil {
+					e.opts.wonCb()
+				}
+			} else {
+				if e.opts.lostCb != nil {
+					e.opts.lostCb()
+				}
+			}
+		}
+	}()
+
+	return nil
+}
+
+func (e *election) maintainLeadership() error {
+	seq, err := e.opts.bucket.Update(e.opts.key, []byte(e.opts.name), e.lastSeq)
+	if err != nil {
+		e.debugf("key update failed, moving to candidate state: %v", err)
+		e.state = CandidateState
+		e.lastSeq = math.MaxUint64
+
+		// stop our grace period notifications
+		e.cancelGraceMu.Lock()
+		if e.graceCancel != nil {
+			e.graceCancel()
+		}
+		e.cancelGraceMu.Unlock()
+
+		if e.opts.lostCb != nil {
+			e.opts.lostCb()
+		}
+
+		return err
+	}
+	e.lastSeq = seq
+
+	return nil
 }
 
 func (e *election) try() error {
@@ -118,44 +194,10 @@ func (e *election) try() error {
 
 	switch e.state {
 	case LeaderState:
-		seq, err := e.opts.bucket.Update(e.opts.key, []byte(e.opts.name), e.lastSeq)
-		if err != nil {
-			e.debugf("key update failed, moving to candidate state: %v", err)
-			e.state = CandidateState
-			e.lastSeq = math.MaxUint64
-			if e.opts.lostCb != nil {
-				e.opts.lostCb()
-			}
-
-			return err
-		}
-		e.lastSeq = seq
-
-		return nil
+		return e.maintainLeadership()
 
 	case CandidateState:
-		seq, err := e.opts.bucket.Create(e.opts.key, []byte(e.opts.name))
-		if err != nil {
-			e.tries++
-			return nil
-		}
-
-		e.lastSeq = seq
-		e.state = LeaderState
-		e.tries = 0
-
-		// we notify the caller after interval so that other the past leader
-		// has a chance to detect the leadership loss, else if the key got just
-		// deleted right before the previous leader did a campaign he will think
-		// he is leader for one more round of cInterval
-		go func() {
-			ctxSleep(e.ctx, e.opts.cInterval+500*time.Millisecond)
-			if e.opts.wonCb != nil {
-				e.opts.wonCb()
-			}
-		}()
-
-		return nil
+		return e.campaignForLeadership()
 
 	default:
 		return fmt.Errorf("campaigned while in unknown state")
@@ -169,8 +211,12 @@ func (e *election) campaign(wg *sync.WaitGroup) error {
 	e.state = CandidateState
 	e.mu.Unlock()
 
-	// spread out startups a bit
-	time.Sleep(time.Duration(rand.Intn(int(e.opts.cInterval.Milliseconds()))))
+	if !e.opts.noSplay {
+		// spread out startups a bit
+		splay := time.Duration(rand.Intn(int(e.opts.cInterval)))
+		e.debugf("Sleeping %v before initial campaign", splay)
+		ctxSleep(e.ctx, splay)
+	}
 
 	var ticker *time.Ticker
 	if e.opts.bo != nil {
@@ -179,23 +225,31 @@ func (e *election) campaign(wg *sync.WaitGroup) error {
 		ticker = time.NewTicker(e.opts.cInterval)
 	}
 
+	tick := func() {
+		err := e.try()
+		if err != nil {
+			e.debugf("election attempt failed: %v", err)
+		}
+
+		if e.opts.bo != nil {
+			ticker.Reset(e.opts.bo.Duration(e.tries))
+		}
+	}
+
+	// initial campaign
+	tick()
+
 	for {
 		select {
 		case <-ticker.C:
-			err := e.try()
-			if err != nil {
-				e.debugf("election attempt failed: %v", err)
-			}
-
-			if e.opts.bo != nil {
-				ticker.Reset(e.opts.bo.Duration(e.tries))
-			}
+			tick()
 
 		case <-e.ctx.Done():
 			ticker.Stop()
 			e.stop()
 
 			if e.opts.lostCb != nil && e.IsLeader() {
+				e.debugf("Calling leader lost during shutdown")
 				e.opts.lostCb()
 			}
 
@@ -208,7 +262,7 @@ func (e *election) stop() {
 	e.mu.Lock()
 	e.started = false
 	e.cancel()
-	e.state = UnknownState
+	e.state = CandidateState
 	e.lastSeq = math.MaxUint64
 	e.mu.Unlock()
 }
