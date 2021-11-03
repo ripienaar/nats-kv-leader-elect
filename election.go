@@ -53,8 +53,7 @@ type election struct {
 	tries      int
 	notifyNext bool
 
-	mu            sync.Mutex
-	cancelGraceMu sync.Mutex
+	mu sync.Mutex
 }
 
 var skipValidate bool
