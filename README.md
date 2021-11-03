@@ -68,6 +68,22 @@ $ go install github.com/ripienaar/nats-kv-leader-elect/cmd/election@main
 $ CONTEXT=election election
 ```
 
+To test failover functions, delete the key being campaigned against:
+
+```nohighlight
+$ nats kv del DEMO_ELECTION demo
+```
+
+A few environment variables can be set to influence the test program:
+
+|Environment|Description|Default|
+|-----------|-----------|-------|
+|NOSPLAY    |Set to 1 to disable initial sleep that spreads campaigners|0|
+|KEY        |The key to campaign against|demo|
+|CONTEXT    |The nats context to connect with, when empty uses the default selected one||
+|WORKERS    |How many workers to start|10|
+
+
 ## Contact?
 
 R.I.Pienaar / @ripienaar / rip@devco.net

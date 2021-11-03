@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strconv"
 	"sync"
 	"time"
 
@@ -82,7 +83,12 @@ func startWorker(ctx context.Context, wg *sync.WaitGroup, bucket nats.KeyValue, 
 		opts = append(opts, election.WithoutSplay())
 	}
 
-	e, err := election.NewElection(name, "demo", bucket, opts...)
+	key := "demo"
+	if os.Getenv("KEY") != "" {
+		key = os.Getenv("KEY")
+	}
+
+	e, err := election.NewElection(name, key, bucket, opts...)
 	if err != nil {
 		log.Printf("Creating election failed: %s", err)
 		return err
@@ -120,11 +126,20 @@ func main() {
 		os.Exit(1)
 	}
 
+	workers := 10
+	if cnt := os.Getenv("WORKERS"); cnt != "" {
+		workers, err = strconv.Atoi(cnt)
+		if err != nil {
+			log.Printf("Invalid workers value %v: %s", cnt, err)
+			os.Exit(1)
+		}
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	wg := &sync.WaitGroup{}
 
-	for i := 1; i < 10; i++ {
+	for i := 1; i <= workers; i++ {
 		wg.Add(1)
 		go startWorker(ctx, wg, bucket, fmt.Sprintf("worker %d", i))
 	}

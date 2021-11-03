@@ -38,11 +38,11 @@ var _ = Describe("NATS KV Leader Election", func() {
 
 		kv, err = js.CreateKeyValue(&nats.KeyValueConfig{
 			Bucket: "LEADER_ELECTION",
-			TTL:    500 * time.Millisecond,
+			TTL:    750 * time.Millisecond,
 		})
 		Expect(err).ToNot(HaveOccurred())
 		debugger = func(f string, a ...interface{}) {
-			fmt.Fprintf(GinkgoWriter, fmt.Sprintf("%s\n", f), a...)
+			fmt.Fprintf(GinkgoWriter, f+"\n", a...)
 		}
 	})
 
@@ -59,7 +59,7 @@ var _ = Describe("NATS KV Leader Election", func() {
 		It("Should validate the TTL", func() {
 			kv, err := js.CreateKeyValue(&nats.KeyValueConfig{
 				Bucket: "LE",
-				TTL:    500 * time.Millisecond,
+				TTL:    750 * time.Millisecond,
 			})
 			Expect(err).ToNot(HaveOccurred())
 
@@ -83,7 +83,7 @@ var _ = Describe("NATS KV Leader Election", func() {
 			var (
 				wins      = 0
 				lost      = 0
-				active    = 0
+				active    = make(map[string]struct{})
 				maxActive = 0
 				other     = 0
 				wg        = &sync.WaitGroup{}
@@ -92,20 +92,23 @@ var _ = Describe("NATS KV Leader Election", func() {
 
 			skipValidate = true
 
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 			defer cancel()
 
 			worker := func(wg *sync.WaitGroup, i int, key string) {
 				defer wg.Done()
 
+				name := fmt.Sprintf("member %d", i)
+
 				winCb := func() {
 					mu.Lock()
 					wins++
-					active++
-					if active > maxActive {
-						maxActive = active
+					active[name] = struct{}{}
+					act := len(active)
+					if act > maxActive {
+						maxActive = act
 					}
-					act := active
+
 					mu.Unlock()
 
 					debugger("%d became leader with %d active leaders", i, act)
@@ -114,16 +117,16 @@ var _ = Describe("NATS KV Leader Election", func() {
 				lostCb := func() {
 					mu.Lock()
 					lost++
-					active--
+					delete(active, name)
 					mu.Unlock()
 					debugger("%d lost leadership", i)
 				}
 
-				elect, err := NewElection(fmt.Sprintf("member %d", i), key, kv,
+				elect, err := NewElection(name, key, kv,
 					WithoutSplay(),
+					// WithDebug(debugger),
 					OnWon(winCb),
-					OnLost(lostCb),
-					WithDebug(debugger))
+					OnLost(lostCb))
 				Expect(err).ToNot(HaveOccurred())
 
 				err = elect.Start(ctx)
@@ -136,21 +139,23 @@ var _ = Describe("NATS KV Leader Election", func() {
 			}
 
 			// make sure another election is not interrupted
-			otherWorker := func(wg *sync.WaitGroup) {
+			otherWorker := func(wg *sync.WaitGroup, i int) {
 				defer wg.Done()
 
-				elect, err := NewElection("other", "other", kv,
+				elect, err := NewElection(fmt.Sprintf("other %d", i), "other", kv,
 					WithoutSplay(),
+					WithDebug(debugger),
 					OnWon(func() {
 						mu.Lock()
-						debugger("other gained leader")
 						other++
+						c := other
 						mu.Unlock()
+						debugger("%d: other gained leader while %d leaders", i, c)
+
 					}),
 					OnLost(func() {
-						mu.Lock()
+						defer GinkgoRecover()
 						Fail("Other election was lost")
-						mu.Unlock()
 					}))
 				Expect(err).ToNot(HaveOccurred())
 
@@ -158,8 +163,8 @@ var _ = Describe("NATS KV Leader Election", func() {
 				Expect(err).ToNot(HaveOccurred())
 			}
 			wg.Add(2)
-			go otherWorker(wg)
-			go otherWorker(wg)
+			go otherWorker(wg, 1)
+			go otherWorker(wg, 2)
 
 			// test failure scenarios, either the key gets deleted to allow a Create() to succeed
 			// or it gets corrupted by putting a item in the key that would therefore change the sequence
@@ -167,8 +172,17 @@ var _ = Describe("NATS KV Leader Election", func() {
 			// fail until the corruption is removed by the MaxAge limit
 			kills := 0
 			for {
-				if ctxSleep(ctx, 750*time.Millisecond) != nil {
+				if ctxSleep(ctx, 150*time.Millisecond) != nil {
 					break
+				}
+
+				mu.Lock()
+				act := len(active)
+				mu.Unlock()
+
+				// only corrupt when there is a leader
+				if act == 0 {
+					continue
 				}
 
 				kills++

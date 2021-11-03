@@ -4,7 +4,7 @@ go 1.16
 
 require (
 	github.com/nats-io/jsm.go v0.0.26
-	github.com/nats-io/nats-server/v2 v2.6.3-0.20211025205628-4ba1ab27bd6c
+	github.com/nats-io/nats-server/v2 v2.6.4-0.20211102224013-c2cb19ce0955
 	github.com/nats-io/nats.go v1.13.1-0.20211018182449-f2416a8b1483
 	github.com/onsi/ginkgo v1.16.5
 	github.com/onsi/gomega v1.16.0
