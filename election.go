@@ -109,7 +109,7 @@ func (e *election) debugf(format string, a ...interface{}) {
 	if e.opts.debug == nil {
 		return
 	}
-	e.opts.debug(fmt.Sprintf("%s @ %s: %s", e.opts.name, e.opts.bucket.Bucket(), format), a...)
+	e.opts.debug(fmt.Sprintf("%s @ %s.%s: %s", e.opts.name, e.opts.bucket.Bucket(), e.opts.key, format), a...)
 }
 
 func (e *election) campaignForLeadership() error {
